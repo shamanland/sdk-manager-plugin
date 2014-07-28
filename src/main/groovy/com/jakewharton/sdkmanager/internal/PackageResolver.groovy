@@ -8,6 +8,7 @@ import org.gradle.api.logging.Logger
 import org.gradle.api.logging.Logging
 import org.gradle.api.tasks.StopExecutionException
 
+import static com.android.SdkConstants.FD_TOOLS
 import static com.android.SdkConstants.FD_BUILD_TOOLS
 import static com.android.SdkConstants.FD_EXTRAS
 import static com.android.SdkConstants.FD_M2_REPOSITORY
@@ -29,6 +30,7 @@ class PackageResolver {
   final Logger log = Logging.getLogger PackageResolver
   final Project project
   final File sdk
+  final File toolsDir
   final File buildToolsDir
   final File platformToolsDir
   final File platformsDir
@@ -42,6 +44,7 @@ class PackageResolver {
     this.project = project
     this.androidCommand = androidCommand
 
+    toolsDir = new File(sdk, FD_TOOLS)
     buildToolsDir = new File(sdk, FD_BUILD_TOOLS)
     platformToolsDir = new File(sdk, FD_PLATFORM_TOOLS)
     platformsDir = new File(sdk, FD_PLATFORMS)
@@ -55,11 +58,49 @@ class PackageResolver {
   }
 
   def resolve() {
+    resolveTools()
     resolveBuildTools()
     resolvePlatformTools()
     resolveCompileVersion()
     resolveSupportLibraryRepository()
     resolvePlayServiceRepository()
+  }
+
+  def resolveTools() {
+    if (!folderExists(toolsDir)) {
+      throw new StopExecutionException('SDK tools not found!')
+    }
+
+    def sourcePropsFile = new File(toolsDir, 'source.properties')
+    if (!sourcePropsFile.canRead()) {
+      throw new StopExecutionException('Could not read source.properties inside SDK tools dir!')
+    }
+
+    def props = new Properties()
+    props.load(new FileInputStream(sourcePropsFile))
+
+    def revision = props.getProperty('Pkg.Revision')
+    if (revision == null) {
+      throw new StopExecutionException('Could not get property Pkg.Revision from SDK tools!')
+    }
+
+    def revisionParts = revision.split('\\.')
+    if (revisionParts == null || revisionParts.length == 0) {
+      throw new StopExecutionException('Could not handle property Pkg.Revision from SDK tools!')
+    }
+
+    // TODO how to replace hard-coded constant?
+    if ((revisionParts[0] as int) >= 23) {
+      log.debug "SDK tools version: $revision"
+      return
+    }
+
+    log.lifecycle "SDK tools outdated. Downloading..."
+
+    def code = androidCommand.update "tool"
+    if (code != 0) {
+      throw new StopExecutionException("SDK tools download failed with code $code.")
+    }
   }
 
   def resolveBuildTools() {
